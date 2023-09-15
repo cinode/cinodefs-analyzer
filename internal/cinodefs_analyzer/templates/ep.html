@@ -1,0 +1,208 @@
+{{/*
+Copyright © 2023 Bartłomiej Święcki (byo)
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/}}
+<!DOCTYPE html>
+<html>
+
+<head>
+	<title>CinodeFS analyzer</title>
+	<style>
+		body {
+			font-family: Arial, sans-serif;
+		}
+
+		table {
+			width: 100%;
+			border-collapse: collapse;
+		}
+
+		th,
+		td {
+			padding: 8px;
+			text-align: left;
+		}
+
+		tr:nth-child(even) {
+			background-color: #f2f2f2;
+		}
+
+		th {
+			background-color: #4CAF50;
+			color: white;
+		}
+
+		.error {
+			color: rgb(196, 18, 18);
+		}
+
+		.current-ep * {
+			font-size: 120%;
+		}
+
+		.current-ep input {
+			min-width: 80%;
+		}
+
+		pre.preview {
+			max-height: 300px;
+			overflow: auto;
+			border: 1px solid #ccc;
+			padding: 10px;
+		}
+
+		#tree {
+			max-height: 300px;
+			overflow: auto;
+			border-color: #ccc;
+			border-style: solid;
+			border-width: 1px;
+		}
+	</style>
+	<script src="/static/jquery.js"></script>
+	<script src="/static/jstree/jstree.min.js"></script>
+	<link rel="stylesheet" href="/static/jstree/themes/default/style.min.css" />
+	<link rel="stylesheet" href="/static/bootstrap-3/css/bootstrap.min.css" />
+</head>
+
+<body>
+	<h1>CinodeFS Analyzer</h1>
+	<hr />
+	<h2>Starting EP:</h2>
+	<p class="current-ep">
+		<input type="text" id="ep" name="ep" value="{{ .EP }}" />
+		<button onclick="window.location.href='/ep/'+ document.getElementById('ep').value">Go</button>
+		<button onclick="window.location.href='/ep/{{ .DefaultEP }}'">Reset</button>
+	</p>
+	<div id="tree"></div>
+	<script>
+		$(function () {
+			function errorNode(err) {
+				return {
+					"text": "Error: " + err,
+					"state": {
+						disabled: true
+					},
+					"icon": "glyphicon glyphicon-exclamation-sign",
+				}
+			}
+
+			function epNode(item) {
+				const safeName = $("<div>").text(item.Name).html();
+				if (item.IsDir) {
+					return {
+						"id": item.EP,
+						"text": safeName,
+						"children": true,
+					}
+				}
+				if (item.IsLink) {
+					return {
+						"id": item.EP,
+						"text": safeName,
+						"icon": "glyphicon glyphicon-link",
+						"children": true,
+					}
+				}
+				return {
+					"id": item.EP,
+					"text": safeName,
+					"icon": "glyphicon glyphicon-file",
+				}
+			}
+
+			function rootNode() {
+				return epNode({
+					Name: "Root",
+					EP: "{{ .EP }}",
+					IsDir: "{{ .IsDir }}" === "true",
+					IsLink: "{{ .IsLink }}" === "true",
+				})
+			}
+
+			function convertToJsTree(data) {
+				if (data.ContentErr) {
+					return [errorNode(data.ContentErr)];
+				}
+
+				if (data.IsLink) {
+					if (data.LinkErr) {
+						return [errorNode(data.LinkErr)];
+					}
+					data.Link.Name = "⇘ (link)";
+					return [epNode(data.Link)];
+				}
+
+				if (data.IsDir) {
+					if (data.DirErr) {
+						return [errorNode(data.DirErr)];
+					}
+
+					var dirs = []
+					var links = []
+					var files = []
+					data.DirContent.forEach(function (item) {
+						// First first, then links, finally other files
+						if (item.IsDir) {
+							dirs.push(epNode(item));
+						} else if (item.IsLink) {
+							links.push(epNode(item));
+						} else {
+							files.push(epNode(item));
+						}
+					});
+
+					return [].concat(dirs, links, files);
+				}
+
+				return [];
+			}
+
+			$("#tree").jstree({
+				'core': {
+					'data': function (node, callback) {
+						if (node.id == "#") {
+							callback(rootNode());
+							return
+						}
+
+						$.ajax({
+							url: "/api/ep/" + node.id,
+							method: 'GET',
+							success: function (data) {
+								console.log(data);
+								callback(convertToJsTree(data));
+							},
+							error: function (error) {
+								callback([errorNode(error.responseText)]);
+							},
+						})
+					},
+				},
+			}).on("select_node.jstree", function(event, data){
+				showDetails(data.node.id);
+			});
+
+			function showDetails(ep) {
+				$("#node-data").load("/api/html/details/" + ep)
+			}
+		});
+	</script>
+
+	<h2>Selected node data:</h2>
+	<div id="node-data"></div>
+
+</body>
+
+</html>

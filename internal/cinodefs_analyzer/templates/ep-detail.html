@@ -1,0 +1,117 @@
+{{/*
+Copyright © 2023 Bartłomiej Święcki (byo)
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/}}
+
+{{ if ne .EPError "" }}
+    <p class="error">ERROR: {{ .EPError }}</p>
+{{ else }}
+    <h2>Entrypoint data:</h2>
+    <table>
+        <tr>
+            <th>Field</th>
+            <th>Value</th>
+        </tr>
+        <tr>
+            <td>Entrypoint</td>
+            <td>{{ .EP }}</td>
+        </tr>
+        <tr>
+            <td>BlobName</td>
+            <td>{{ .BlobName }}</td>
+        </tr>
+        <tr>
+            <td>BlobType</td>
+            <td>{{ .BlobType }}</td>
+        </tr>
+        <tr>
+            <td>MimeType</td>
+            <td>{{ .EPData.GetMimeType }}</td>
+        </tr>
+        <tr>
+            <td>Not Valid Before</td>
+            <td>{{ .NotValidBefore }}</td>
+        </tr>
+        <tr>
+            <td>Not Valid After</td>
+            <td>{{ .NotValidAfter }}</td>
+        </tr>
+        <tr>
+            <td>Key Info</td>
+            <td>
+                <pre>{{ .KeyInfo }}</pre>
+            </td>
+        </tr>
+        {{/*
+        <tr>
+            <td>Raw json dump</td>
+            <td>
+                <pre>{{ .EPDump }}</pre>
+            </td>
+        </tr>
+        */}}
+    </table>
+
+    <h2>Blob data:</h2>
+    {{ if .ContentErr }}
+        <p class="error"><b>Error while reading blob:</b><br />{{ .ContentErr }}</p>
+    {{ else }}
+
+        {{ if .IsLink }}
+            <h3>Dynamic link</h3>
+            {{ if .LinkErr }}
+                <p class="error"><b>Error while parsing link:</b><br />{{ .LinkErr }}</p>
+            {{ else }}
+                <p>Link's entrypoint: <br/>{{ .Link.EP }}</p>
+            {{ end }}
+        {{ end }}
+
+        {{ if .Image }}
+            <h3>Image preview:</h3>
+            <img src="data:{{ .EPData.GetMimeType }};base64,{{.Image}}" alt="Image preview" />
+        {{ end }}
+
+        {{ if .Text }}
+            <h3>Text preview:</h3>
+            <pre class="preview">{{ .Text }}</pre>
+        {{ end }}
+
+        {{ if or .DirErr .DirContent }}
+            <h3>Directory entries</h3>
+            {{ if .DirErr }}
+                <p class="error"><b>Error while reading directory content:</b><br />{{ .DirErr }}</p>
+            {{ else }}
+                <table>
+                    <tr>
+                        <th>No.</th>
+                        <th>Dir</th>
+                        <th>Name</th>
+                        <th>MimeType</th>
+                    </tr>
+                    {{range $no, $entry := .DirContent }}
+                    <tr>
+                        <td>{{ $no }}</td>
+                        <td>{{if .IsDir }}[DIR]{{end}}</td>
+                        <td>{{ $entry.Name }}</td>
+                        <td>{{ $entry.MimeType }}</td>
+                    </tr>
+                    {{end}}
+                </table>
+            {{ end }}
+        {{ end }}
+
+        <h3>Hex dump</h3>
+        <pre>{{ .ContentHexDump }}</pre>
+    {{ end }}
+{{ end }}
