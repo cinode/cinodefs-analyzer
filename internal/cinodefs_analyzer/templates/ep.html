@@ -81,7 +81,7 @@ limitations under the License.
 	<hr />
 	<h2>Starting EP:</h2>
 	<p class="current-ep">
-		<input type="text" id="ep" name="ep" value="{{ .EP }}" />
+		<input type="text" id="ep" name="ep" value="{{ .EP.Str }}" />
 		<button onclick="window.location.href='/ep/'+ document.getElementById('ep').value">Go</button>
 		<button onclick="window.location.href='/ep/{{ .DefaultEP }}'">Reset</button>
 	</p>
@@ -99,35 +99,34 @@ limitations under the License.
 			}
 
 			function epNode(item) {
+				if (item.Err) {
+					return errorNode(item.Err);
+				}
 				const safeName = $("<div>").text(item.Name).html();
-				if (item.IsDir) {
-					return {
-						"id": item.EP,
-						"text": safeName,
-						"children": true,
-					}
-				}
-				if (item.IsLink) {
-					return {
-						"id": item.EP,
-						"text": safeName,
-						"icon": "glyphicon glyphicon-link",
-						"children": true,
-					}
-				}
-				return {
-					"id": item.EP,
+				var ret = {
+					"id": item.Str,
 					"text": safeName,
-					"icon": "glyphicon glyphicon-file",
+					"children": false,
 				}
+
+				if (item.IsDir) {
+					ret["children"] = true;
+				} else if (item.IsLink) {
+					ret["icon"] = "glyphicon glyphicon-link";
+					ret["children"] = true;
+				} else {
+					ret["icon"] = "glyphicon glyphicon-file";
+				}
+
+				return ret;
 			}
 
 			function rootNode() {
 				return epNode({
 					Name: "Root",
-					EP: "{{ .EP }}",
-					IsDir: "{{ .IsDir }}" === "true",
-					IsLink: "{{ .IsLink }}" === "true",
+					Str: "{{ .EP.Str }}",
+					IsDir: "{{ .EP.IsDir }}" === "true",
+					IsLink: "{{ .EP.IsLink }}" === "true",
 				})
 			}
 
@@ -135,16 +134,16 @@ limitations under the License.
 				if (data.ContentErr) {
 					return [errorNode(data.ContentErr)];
 				}
+				if (data.EP.Err) {
+					return [errorNode(data.EP.Err)];
+				}
 
-				if (data.IsLink) {
-					if (data.LinkErr) {
-						return [errorNode(data.LinkErr)];
-					}
+				if (data.EP.IsLink) {
 					data.Link.Name = "⇘ (link)";
 					return [epNode(data.Link)];
 				}
 
-				if (data.IsDir) {
+				if (data.EP.IsDir) {
 					if (data.DirErr) {
 						return [errorNode(data.DirErr)];
 					}
@@ -190,7 +189,7 @@ limitations under the License.
 						})
 					},
 				},
-			}).on("select_node.jstree", function(event, data){
+			}).on("select_node.jstree", function (event, data) {
 				showDetails(data.node.id);
 			});
 

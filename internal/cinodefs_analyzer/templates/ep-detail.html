@@ -14,8 +14,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */}}
 
-{{ if ne .EPError "" }}
-    <p class="error">ERROR: {{ .EPError }}</p>
+{{ if .EP.Err }}
+    <p class="error">ERROR: {{ .EP.Err }}</p>
 {{ else }}
     <h2>Entrypoint data:</h2>
     <table>
@@ -25,39 +25,39 @@ limitations under the License.
         </tr>
         <tr>
             <td>Entrypoint</td>
-            <td>{{ .EP }}</td>
+            <td>{{ .EP.Str }}</td>
         </tr>
         <tr>
             <td>BlobName</td>
-            <td>{{ .BlobName }}</td>
+            <td>{{ .EP.BN.String }}</td>
         </tr>
         <tr>
             <td>BlobType</td>
-            <td>{{ .BlobType }}</td>
+            <td>{{ .EP.BN.Type | blobTypeString }}</td>
         </tr>
         <tr>
             <td>MimeType</td>
-            <td>{{ .EPData.GetMimeType }}</td>
+            <td>{{ .EP.EP.GetMimeType }}</td>
         </tr>
         <tr>
             <td>Not Valid Before</td>
-            <td>{{ .NotValidBefore }}</td>
+            <td>{{ if .EP.NotValidBefore }}{{ .EP.NotValidBefore }}{{ end }}</td>
         </tr>
         <tr>
             <td>Not Valid After</td>
-            <td>{{ .NotValidAfter }}</td>
+            <td>{{ if .EP.NotValidAfter }}{{ .EP.NotValidAfter }}{{ end }}</td>
         </tr>
         <tr>
             <td>Key Info</td>
             <td>
-                <pre>{{ .KeyInfo }}</pre>
+                <pre>{{ .EP.EP.KeyInfo | toJson }}</pre>
             </td>
         </tr>
         {{/*
         <tr>
             <td>Raw json dump</td>
             <td>
-                <pre>{{ .EPDump }}</pre>
+                <pre>{{ .EP.EP | toJson }}</pre>
             </td>
         </tr>
         */}}
@@ -67,27 +67,20 @@ limitations under the License.
     {{ if .ContentErr }}
         <p class="error"><b>Error while reading blob:</b><br />{{ .ContentErr }}</p>
     {{ else }}
-
-        {{ if .IsLink }}
+        {{ if .EP.IsLink }}
             <h3>Dynamic link</h3>
-            {{ if .LinkErr }}
-                <p class="error"><b>Error while parsing link:</b><br />{{ .LinkErr }}</p>
+            {{ if .Link.Err }}
+                <p class="error"><b>Error while parsing link:</b><br />{{ .Link.Err }}</p>
             {{ else }}
-                <p>Link's entrypoint: <br/>{{ .Link.EP }}</p>
+                <p>Link's entrypoint: <br/>{{ .Link.Str }}</p>
             {{ end }}
-        {{ end }}
-
-        {{ if .Image }}
+        {{ else if .Image }}
             <h3>Image preview:</h3>
-            <img src="data:{{ .EPData.GetMimeType }};base64,{{.Image}}" alt="Image preview" />
-        {{ end }}
-
-        {{ if .Text }}
+            <img src="data:{{ .EP.EP.GetMimeType }};base64,{{.Image}}" alt="Image preview" />
+        {{ else if .Text }}
             <h3>Text preview:</h3>
             <pre class="preview">{{ .Text }}</pre>
-        {{ end }}
-
-        {{ if or .DirErr .DirContent }}
+        {{ else if .EP.IsDir }}
             <h3>Directory entries</h3>
             {{ if .DirErr }}
                 <p class="error"><b>Error while reading directory content:</b><br />{{ .DirErr }}</p>
@@ -98,13 +91,15 @@ limitations under the License.
                         <th>Dir</th>
                         <th>Name</th>
                         <th>MimeType</th>
+                        <th>Entrypoint</th>
                     </tr>
                     {{range $no, $entry := .DirContent }}
                     <tr>
                         <td>{{ $no }}</td>
-                        <td>{{if .IsDir }}[DIR]{{end}}</td>
+                        <td>{{if $entry.IsDir }}[DIR]{{end}}</td>
                         <td>{{ $entry.Name }}</td>
-                        <td>{{ $entry.MimeType }}</td>
+                        <td>{{ $entry.EP.GetMimeType }}</td>
+                        <td>{{ $entry.Str }}</td>
                     </tr>
                     {{end}}
                 </table>

@@ -31,10 +31,10 @@ import (
 
 	"github.com/cinode/go/pkg/blenc"
 	"github.com/cinode/go/pkg/blobtypes"
+	"github.com/cinode/go/pkg/cinodefs"
+	"github.com/cinode/go/pkg/cinodefs/protobuf"
 	"github.com/cinode/go/pkg/common"
 	"github.com/cinode/go/pkg/datastore"
-	"github.com/cinode/go/pkg/protobuf"
-	"github.com/cinode/go/pkg/structure"
 	"github.com/cinode/go/pkg/utilities/golang"
 	"github.com/cinode/go/pkg/utilities/httpserver"
 	"github.com/jbenet/go-base58"
@@ -61,40 +61,77 @@ func buildAnalyzerHttpHandler(cfg AnalyzerConfig) (http.Handler, error) {
 	)
 
 	type ParsedEP struct {
-		Name     string
-		EP       string
-		MimeType string
-		IsDir    bool
-		IsLink   bool
+		Name           string
+		EP             *protobuf.Entrypoint
+		Str            string
+		BN             *common.BlobName
+		MimeType       string
+		IsDir          bool
+		IsLink         bool
+		NotValidBefore *time.Time
+		NotValidAfter  *time.Time
+		Err            string
 	}
 
 	getParsedEP := func(ep *protobuf.Entrypoint, name string) ParsedEP {
-		epBytes, _ := proto.Marshal(ep)
-		return ParsedEP{
-			IsDir:    ep.GetMimeType() == structure.CinodeDirMimeType,
-			IsLink:   common.BlobName(ep.GetBlobName()).Type() == blobtypes.DynamicLink,
+		epBytes, err := proto.Marshal(ep)
+		if err != nil {
+			return ParsedEP{Err: err.Error()}
+		}
+		bn, err := common.BlobNameFromBytes(ep.GetBlobName())
+		if err != nil {
+			return ParsedEP{Err: err.Error()}
+		}
+		ret := ParsedEP{
+			IsDir:    ep.GetMimeType() == cinodefs.CinodeDirMimeType,
+			IsLink:   bn.Type() == blobtypes.DynamicLink,
 			Name:     name,
-			EP:       base58.Encode(epBytes),
+			EP:       ep,
+			Str:      base58.Encode(epBytes),
+			BN:       bn,
 			MimeType: ep.GetMimeType(),
 		}
+
+		if ep.GetNotValidBeforeUnixMicro() > 0 {
+			t := time.UnixMicro(
+				ep.GetNotValidBeforeUnixMicro(),
+			).UTC()
+			ret.NotValidBefore = &t
+		}
+
+		if ep.GetNotValidAfterUnixMicro() > 0 {
+			t := time.UnixMicro(
+				ep.GetNotValidAfterUnixMicro(),
+			).UTC()
+			ret.NotValidAfter = &t
+		}
+
+		return ret
+	}
+
+	getParsedEPFromBytes := func(epBytes []byte, name string) ParsedEP {
+		ep := protobuf.Entrypoint{}
+		err := proto.Unmarshal(epBytes, &ep)
+		if err != nil {
+			return ParsedEP{Err: err.Error()}
+		}
+		return getParsedEP(&ep, name)
+	}
+
+	getParsedEPFromString := func(epString string, name string) ParsedEP {
+		epBytes := base58.Decode(epString)
+		if base58.Encode(epBytes) != epString {
+			return ParsedEP{Err: "invalid entrypoint - not a base58 data"}
+		}
+		return getParsedEPFromBytes(epBytes, name)
 	}
 
 	type EPData struct {
-		EP             string
-		EPError        string
-		EPData         *protobuf.Entrypoint
-		BlobName       string
-		BlobType       string
-		NotValidBefore string
-		NotValidAfter  string
-		KeyInfo        string
+		EP             ParsedEP
 		EPDump         string
 		ContentErr     string
 		ContentHexDump string
 		ContentLen     int
-		IsLink         bool
-		IsDir          bool
-		LinkErr        string
 		Link           ParsedEP
 		DirErr         string
 		DirContent     []ParsedEP
@@ -104,7 +141,12 @@ func buildAnalyzerHttpHandler(cfg AnalyzerConfig) (http.Handler, error) {
 	}
 
 	readBlob := func(ctx context.Context, be blenc.BE, ep *protobuf.Entrypoint) ([]byte, error) {
-		contentReader, err := be.Open(ctx, common.BlobName(ep.BlobName), ep.KeyInfo.Key)
+		bn, err := common.BlobNameFromBytes(ep.GetBlobName())
+		if err != nil {
+			return nil, err
+		}
+		key := common.BlobKeyFromBytes(ep.KeyInfo.GetKey())
+		contentReader, err := be.Open(ctx, bn, key)
 		if err != nil {
 			return nil, err
 		}
@@ -115,51 +157,20 @@ func buildAnalyzerHttpHandler(cfg AnalyzerConfig) (http.Handler, error) {
 
 	extractParams := func(ctx context.Context, eps string) EPData {
 		pageParams := EPData{
-			EP:        eps,
 			DefaultEP: cfg.Entrypoint,
 		}
 
-		if pageParams.EP == "" {
-			pageParams.EPError = "Missing entrypoint data"
+		if eps == "" {
+			pageParams.EP = ParsedEP{Err: "Missing entrypoint data"}
 			return pageParams
 		}
 
-		epBytes := base58.Decode(pageParams.EP)
-		if base58.Encode(epBytes) != pageParams.EP {
-			pageParams.EPError = "Invalid entrypoint - not a base58 data"
+		pageParams.EP = getParsedEPFromString(eps, "")
+		if pageParams.EP.Err != "" {
 			return pageParams
 		}
 
-		ep, err := protobuf.EntryPointFromBytes(epBytes)
-		if err != nil {
-			pageParams.EPError = err.Error()
-			return pageParams
-		}
-
-		pageParams.EPData = ep
-		bn := common.BlobName(ep.GetBlobName())
-		pageParams.BlobName = bn.String()
-		pageParams.BlobType = blobtypes.ToName(bn.Type())
-
-		if ep.GetNotValidBeforeUnixMicro() > 0 {
-			pageParams.NotValidBefore = time.UnixMicro(
-				ep.GetNotValidBeforeUnixMicro(),
-			).UTC().Format(time.RFC3339Nano)
-		}
-
-		if ep.GetNotValidAfterUnixMicro() > 0 {
-			pageParams.NotValidAfter = time.UnixMicro(
-				ep.GetNotValidAfterUnixMicro(),
-			).UTC().Format(time.RFC3339Nano)
-		}
-
-		keyInfo, _ := json.MarshalIndent(ep.KeyInfo, "", "  ")
-		pageParams.KeyInfo = string(keyInfo)
-
-		epDump, _ := json.MarshalIndent(&ep, "", "  ")
-		pageParams.EPDump = string(epDump)
-
-		content, err := readBlob(ctx, be, ep)
+		content, err := readBlob(ctx, be, pageParams.EP.EP)
 		if err != nil {
 			pageParams.ContentErr = err.Error()
 			return pageParams
@@ -184,35 +195,27 @@ func buildAnalyzerHttpHandler(cfg AnalyzerConfig) (http.Handler, error) {
 		pageParams.ContentHexDump = sb.String()
 		pageParams.ContentLen = len(content)
 
-		switch bn.Type() {
-		case blobtypes.DynamicLink:
-			pageParams.IsLink = true
-			linkEP := protobuf.Entrypoint{}
-			err := proto.Unmarshal(content, &linkEP)
+		switch {
+		case pageParams.EP.IsLink:
+			pageParams.Link = getParsedEPFromBytes(content, "")
+
+		case pageParams.EP.IsDir:
+			dir := protobuf.Directory{}
+			err = proto.Unmarshal(content, &dir)
 			if err != nil {
-				pageParams.LinkErr = err.Error()
-			} else {
-				pageParams.Link = getParsedEP(&linkEP, "")
+				pageParams.DirErr = err.Error()
+			}
+			for _, e := range dir.GetEntries() {
+				pageParams.DirContent = append(pageParams.DirContent,
+					getParsedEP(e.GetEp(), e.GetName()),
+				)
 			}
 
-		case blobtypes.Static:
-			if ep.MimeType == structure.CinodeDirMimeType {
+		case strings.HasPrefix(pageParams.EP.MimeType, "image/"):
+			pageParams.Image = base64.RawStdEncoding.EncodeToString(content)
 
-				dir := protobuf.Directory{}
-
-				err = proto.Unmarshal(content, &dir)
-				if err != nil {
-					pageParams.DirErr = err.Error()
-				}
-				pageParams.IsDir = true
-				for _, e := range dir.GetEntries() {
-					pageParams.DirContent = append(pageParams.DirContent, getParsedEP(e.GetEp(), e.GetName()))
-				}
-			} else if strings.HasPrefix(ep.MimeType, "image/") {
-				pageParams.Image = base64.RawStdEncoding.EncodeToString(content)
-			} else if strings.HasPrefix(ep.MimeType, "text/") {
-				pageParams.Text = string(content)
-			}
+		case strings.HasPrefix(pageParams.EP.MimeType, "text/"):
+			pageParams.Text = string(content)
 		}
 
 		return pageParams
@@ -243,7 +246,15 @@ func buildAnalyzerHttpHandler(cfg AnalyzerConfig) (http.Handler, error) {
 
 //go:embed templates/*.html
 var templatesFS embed.FS
-var pageTemplate = golang.Must(template.ParseFS(templatesFS, "templates/*.html"))
+var pageTemplate = golang.Must(template.New("cinodefs-analyzer").Funcs(template.FuncMap{
+	"toJson": func(v interface{}) string {
+		a, _ := json.MarshalIndent(v, "", "  ")
+		return string(a)
+	},
+	"blobTypeString": func(bt common.BlobType) string {
+		return blobtypes.ToName(bt)
+	},
+}).ParseFS(templatesFS, "templates/*.html"))
 
 //go:embed static
 var staticFS embed.FS
