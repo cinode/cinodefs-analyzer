@@ -72,7 +72,49 @@ limitations under the License.
             {{ if .Link.Err }}
                 <p class="error"><b>Error while parsing link:</b><br />{{ .Link.Err }}</p>
             {{ else }}
-                <p>Link's entrypoint: <br/>{{ .Link.Str }}</p>
+                {{ if .Link.LinkDataErr }}
+                    <p class="error"><b>Error while parsing link data:</b><br />{{ .Link.LinkDataErr }}</p>
+                {{ end }}
+                <table>
+                    <tr>
+                        <th>Field</th>
+                        <th>Value</th>
+                    </tr>
+                    <tr class="section">
+                        <td colspan="2"><b><i>Unchanging data</i></b></td>
+                    </tr>
+                    <tr>
+                        <td>Target</td>
+                        <td>{{ .Link.Str }}</td>
+                    </tr>
+                    <tr>
+                        <td>Link format version</td>
+                        <td>{{ .Link.LinkVersion }}</td>
+                    </tr>
+                    <tr>
+                        <td>ED25519 Public Key</td>
+                        <td>{{ .Link.PublicKey  | hex }}</td>
+                    </tr>
+                    <tr>
+                        <td>Nonce</td>
+                        <td>{{ .Link.Nonce }}</td>
+                    </tr>
+                    <tr class="section">
+                        <td colspan="2"><b><i>Variable data</i></b></td>
+                    </tr>
+                    <tr>
+                        <td>Signature</td>
+                        <td>{{ .Link.Signature | hex }}</td>
+                    </tr>
+                    <tr>
+                        <td>Content Version</td>
+                        <td>{{ .Link.ContentVersion }}</td>
+                    </tr>
+                    <tr>
+                        <td>Initialization Vector</td>
+                        <td>{{ .Link.IV | hex }}</td>
+                    </tr>
+                </table>
             {{ end }}
         {{ else if .Image }}
             <h3>Image preview:</h3>

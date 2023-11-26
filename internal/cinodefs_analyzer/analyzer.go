@@ -18,8 +18,10 @@ package cinodefs_analyzer
 
 import (
 	"context"
+	"crypto/ed25519"
 	"embed"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -40,6 +42,27 @@ import (
 	"github.com/jbenet/go-base58"
 	"google.golang.org/protobuf/proto"
 )
+
+type ContentParser struct {
+	dataLeft []byte
+	err      error
+}
+
+func (c *ContentParser) Data(len int) []byte {
+	ret := make([]byte, len)
+	if c.err != nil {
+		return ret
+	}
+	copied := copy(ret, c.dataLeft)
+	c.dataLeft = c.dataLeft[copied:]
+	if copied < len {
+		c.err = fmt.Errorf("not enough data")
+	}
+	return ret
+}
+
+func (c *ContentParser) Byte() byte     { return c.Data(1)[0] }
+func (c *ContentParser) Uint64() uint64 { return binary.BigEndian.Uint64(c.Data(8)) }
 
 type AnalyzerConfig struct {
 	DatastoreAddr string
@@ -71,6 +94,17 @@ func buildAnalyzerHttpHandler(cfg AnalyzerConfig) (http.Handler, error) {
 		NotValidBefore *time.Time
 		NotValidAfter  *time.Time
 		Err            string
+	}
+
+	type ParsedEPLink struct {
+		ParsedEP       `       json:",inline"`
+		LinkVersion    uint8  `json:"linkVersion"`
+		PublicKey      []byte `json:"publicKey"`
+		Nonce          uint64 `json:"nonce"`
+		Signature      []byte `json:"signature"`
+		ContentVersion uint64 `json:"contentVersion"`
+		IV             []byte `json:"iv"`
+		LinkDataErr    string `json:"linkDataErr"`
 	}
 
 	getParsedEP := func(ep *protobuf.Entrypoint, name string) ParsedEP {
@@ -132,12 +166,21 @@ func buildAnalyzerHttpHandler(cfg AnalyzerConfig) (http.Handler, error) {
 		ContentErr     string
 		ContentHexDump string
 		ContentLen     int
-		Link           ParsedEP
+		Link           ParsedEPLink
 		DirErr         string
 		DirContent     []ParsedEP
 		Image          string
 		Text           string
 		DefaultEP      string
+	}
+
+	readRawContent := func(ctx context.Context, ds datastore.DS, bn *common.BlobName) ([]byte, error) {
+		r, err := ds.Open(ctx, bn)
+		if err != nil {
+			return nil, err
+		}
+		defer r.Close()
+		return io.ReadAll(r)
 	}
 
 	readBlob := func(ctx context.Context, be blenc.BE, ep *protobuf.Entrypoint) ([]byte, error) {
@@ -170,6 +213,12 @@ func buildAnalyzerHttpHandler(cfg AnalyzerConfig) (http.Handler, error) {
 			return pageParams
 		}
 
+		rawContent, err := readRawContent(ctx, ds, pageParams.EP.BN)
+		if err != nil {
+			pageParams.ContentErr = err.Error()
+			return pageParams
+		}
+
 		content, err := readBlob(ctx, be, pageParams.EP.EP)
 		if err != nil {
 			pageParams.ContentErr = err.Error()
@@ -197,7 +246,21 @@ func buildAnalyzerHttpHandler(cfg AnalyzerConfig) (http.Handler, error) {
 
 		switch {
 		case pageParams.EP.IsLink:
-			pageParams.Link = getParsedEPFromBytes(content, "")
+			pageParams.Link = ParsedEPLink{
+				ParsedEP: getParsedEPFromBytes(content, ""),
+			}
+			parser := ContentParser{dataLeft: rawContent}
+			pageParams.Link.LinkVersion = parser.Byte()
+			pageParams.Link.PublicKey = parser.Data(ed25519.PublicKeySize)
+			pageParams.Link.Nonce = parser.Uint64()
+			pageParams.Link.Signature = parser.Data(ed25519.SignatureSize)
+			pageParams.Link.ContentVersion = parser.Uint64()
+			ivSize := parser.Byte()
+			if ivSize > 0x7F {
+				pageParams.Link.LinkDataErr = "invalid iv size"
+			} else {
+				pageParams.Link.IV = parser.Data(int(ivSize))
+			}
 
 		case pageParams.EP.IsDir:
 			dir := protobuf.Directory{}
@@ -253,6 +316,16 @@ var pageTemplate = golang.Must(template.New("cinodefs-analyzer").Funcs(template.
 	},
 	"blobTypeString": func(bt common.BlobType) string {
 		return blobtypes.ToName(bt)
+	},
+	"hex": func(buf []byte) string {
+		ret := &strings.Builder{}
+		for i, b := range buf {
+			if i > 0 {
+				ret.WriteRune(' ')
+			}
+			fmt.Fprintf(ret, "%02X", b)
+		}
+		return ret.String()
 	},
 }).ParseFS(templatesFS, "templates/*.html"))
 

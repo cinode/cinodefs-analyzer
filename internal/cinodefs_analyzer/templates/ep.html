@@ -43,6 +43,10 @@ limitations under the License.
 			color: white;
 		}
 
+		tr.section {
+			background-color: #90d0d8;
+		}
+
 		.error {
 			color: rgb(196, 18, 18);
 		}
@@ -139,7 +143,7 @@ limitations under the License.
 				}
 
 				if (data.EP.IsLink) {
-					data.Link.Name = "⇘ (link)";
+					data.Link.Name = "⇘ (link target)";
 					return [epNode(data.Link)];
 				}
 
