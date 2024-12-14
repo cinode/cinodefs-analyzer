@@ -102,13 +102,13 @@ limitations under the License.
 				}
 			}
 
-			function epNode(item) {
+			function epNode(item, pathStr) {
 				if (item.Err) {
 					return errorNode(item.Err);
 				}
 				const safeName = $("<div>").text(item.Name).html();
 				var ret = {
-					"id": item.Str,
+					"id": item.Str + ":" + pathStr,
 					"text": safeName,
 					"children": false,
 				}
@@ -131,10 +131,10 @@ limitations under the License.
 					Str: "{{ .EP.Str }}",
 					IsDir: "{{ .EP.IsDir }}" === "true",
 					IsLink: "{{ .EP.IsLink }}" === "true",
-				})
+				}, "/")
 			}
 
-			function convertToJsTree(data) {
+			function convertToJsTree(data, path) {
 				if (data.ContentErr) {
 					return [errorNode(data.ContentErr)];
 				}
@@ -144,7 +144,7 @@ limitations under the License.
 
 				if (data.EP.IsLink) {
 					data.Link.Name = "⇘ (link target)";
-					return [epNode(data.Link)];
+					return [epNode(data.Link, path+"/@link")];
 				}
 
 				if (data.EP.IsDir) {
@@ -158,11 +158,11 @@ limitations under the License.
 					data.DirContent.forEach(function (item) {
 						// First first, then links, finally other files
 						if (item.IsDir) {
-							dirs.push(epNode(item));
+							dirs.push(epNode(item, path+"/"+item.Name));
 						} else if (item.IsLink) {
-							links.push(epNode(item));
+							links.push(epNode(item, path+"/"+item.Name));
 						} else {
-							files.push(epNode(item));
+							files.push(epNode(item, path+"/"+item.Name));
 						}
 					});
 
@@ -181,11 +181,11 @@ limitations under the License.
 						}
 
 						$.ajax({
-							url: "/api/ep/" + node.id,
+							url: "/api/ep/" + node.id.split(':')[0],
 							method: 'GET',
 							success: function (data) {
 								console.log(data);
-								callback(convertToJsTree(data));
+								callback(convertToJsTree(data, node.id.split(':')[1]));
 							},
 							error: function (error) {
 								callback([errorNode(error.responseText)]);
@@ -194,7 +194,7 @@ limitations under the License.
 					},
 				},
 			}).on("select_node.jstree", function (event, data) {
-				showDetails(data.node.id);
+				showDetails(data.node.id.split(":")[0]);
 			});
 
 			function showDetails(ep) {
